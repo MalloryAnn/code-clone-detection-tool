@@ -29,7 +29,7 @@ Clone Reports: Generates detailed reports of detected clones.
 
 
 # Contributers
-Demetrio Deanda (@ddean2) - Collaborator                                          
+Demetrio Deanda (@ddean09) - Collaborator                                          
 Mallory Sorola (@MalloryAnn) - Collaborator
 
 
