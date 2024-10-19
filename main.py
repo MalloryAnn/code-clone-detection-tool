@@ -14,6 +14,7 @@ file_menu = tk.Menu(menu_bar, tearoff=0)
 file_menu.add_command(label="Open Codebase", command=lambda: open_file())
 menu_bar.add_cascade(label="File", menu=file_menu)
 
+
 # Help menu for profesh reasons
 help_menu = tk.Menu(menu_bar, tearoff=0)
 help_menu.add_command(label="Help", command=lambda: show_help())
@@ -38,6 +39,7 @@ def open_file():
             code_display.delete(1.0, tk.END)  # Clear existing content in the box
             code_display.insert(tk.END, code)  # Insert new code
 
+
 # Add button to run clone detection
 run_button = tk.Button(root, text="Run Clone Detection", command=lambda: detect_clones())
 run_button.pack(pady=10)
@@ -48,6 +50,7 @@ results_label.pack()
 
 results_listbox = tk.Listbox(root, height=80, width=100)
 results_listbox.pack(padx=10, pady=10)
+
 
 # Placeholder for clone detection code
 def detect_clones():
@@ -60,6 +63,7 @@ def detect_clones():
 # Help function
 def show_help():
     messagebox.showinfo("Help", "This tool helps you detect code clones in Python and Java files. Use 'Open Codebase' to select your file and 'Run Clone Detection' to identify potential clones.")
+
 
 # Function to open Settings window
 def open_settings():
@@ -74,8 +78,10 @@ def open_settings():
     apply_button = tk.Button(settings_window, text="Apply", command=lambda: apply_settings(sensitivity_slider.get()))
     apply_button.pack(pady=10)
 
+
 def apply_settings(sensitivity):
     print(f"Sensitivity set to: {sensitivity}")
+
 
 # Settings button
 settings_button = tk.Button(root, text="Settings", command=open_settings)
