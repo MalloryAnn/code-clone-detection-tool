@@ -1,181 +1,243 @@
-import tkinter as tk  # Import Tkinter for GUI
-from tkinter import filedialog, messagebox  # For file dialogs and message boxes
-import difflib  # For similarity comparison
+"""
+Code Clone Detection Tool
 
-# Define global variable for sensitivity (used to control detection thresholds)
+This script provides a GUI-based tool for detecting code clones within a specified directory.
+It uses Tkinter for the GUI, allowing users to:
+- Load code files from a selected directory.
+- Run a clone detection process, which classifies clones based on similarity.
+- Adjust sensitivity settings for detection.
+- Save clone detection reports as CSV or PDF files.
+
+Detection sensitivity is controlled by a slider in the settings window, which allows users to define
+how strict the similarity threshold should be for clone classification.
+
+Clone detection types:
+- Type 1: 100% similarity.
+- Type 2: 90% similarity.
+- Type 3: 70% similarity.
+"""
+
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import difflib
+import os
+import threading
+import re
+import csv
+from fpdf import FPDF  # Install with: pip install fpdf
+
 current_sensitivity = 9  # Default sensitivity
+clone_results = []  # Store clone results
 
 
 def calculate_similarity(code1, code2):
     """
-    Calculate the similarity ratio between two pieces of code.
+    Calculates similarity between two pieces of code using difflib's SequenceMatcher.
+    Cleans code strings before calculation.
 
-    Args:
-        code1 (str): The first code snippet.
-        code2 (str): The second code snippet.
-
-    Returns:
-        float: A similarity ratio between 0 and 1.
-    """
-    # Strip whitespace and ignore commented lines
-    stripped_code1 = [line.strip() for line in code1.splitlines() if line.strip() and not line.startswith('#')]
-    stripped_code2 = [line.strip() for line in code2.splitlines() if line.strip() and not line.startswith('#')]
-
-    # Use SequenceMatcher to calculate similarity ratio
-    return difflib.SequenceMatcher(None, stripped_code1, stripped_code2).ratio()
-
-
-def detect_clones_with_sensitivity(codebase, sensitivity):
-    """
-    Detect code clones within the provided codebase based on sensitivity settings.
-
-    Args:
-        codebase (str): The code content to analyze.
-        sensitivity (int): Sensitivity level (1-10) that controls detection thresholds.
+    Parameters:
+        code1 (str): The first code snippet to compare.
+        code2 (str): The second code snippet to compare.
 
     Returns:
-        list: A list of detected clone results.
+        float: The similarity ratio between code1 and code2.
     """
-    clone_results = []  # Store clone detection results
-    lines = codebase.splitlines()  # Split codebase into lines
-
-    # Define similarity thresholds based on the sensitivity setting
-    type1_threshold = 1.0 * (sensitivity / 10)  # Type 1 clone: Exact match
-    type2_threshold = 0.9 * (sensitivity / 10)  # Type 2 clone: Slightly modified
-    type3_threshold = 0.7 * (sensitivity / 10)  # Type 3 clone: Moderately modified
-
-    # Compare every line with every other line in the codebase
-    for i, line1 in enumerate(lines):
-        for j, line2 in enumerate(lines):
-            if i != j:  # Skip comparison with the same line
-                similarity = calculate_similarity(line1, line2)
-                # Check similarity against the thresholds
-                if similarity >= type1_threshold:
-                    clone_results.append(f"Type 1 Clone detected at lines {i + 1} and {j + 1}")
-                elif similarity >= type2_threshold:
-                    clone_results.append(f"Type 2 Clone detected at lines {i + 1} and {j + 1}")
-                elif similarity >= type3_threshold:
-                    clone_results.append(f"Type 3 Clone detected at lines {i + 1} and {j + 1}")
-
-    return clone_results
+    cleaned_code1 = clean_code(code1)
+    cleaned_code2 = clean_code(code2)
+    return difflib.SequenceMatcher(None, cleaned_code1, cleaned_code2).ratio()
 
 
-def open_file():
+def clean_code(code):
     """
-    Open a file dialog to select and load a codebase into the text display widget.
+    Removes comments, import statements, and excess whitespace from code.
+
+    Parameters:
+        code (str): The code to clean.
+
+    Returns:
+        str: The cleaned code.
     """
-    try:
-        file_path = filedialog.askopenfilename(
-            title="Select a File",
-            filetypes=[("Python Files", "*.py"), ("Java Files", "*.java"), ("All Files", "*.*")]
-        )
-        if file_path:
-            print(f"File selected: {file_path}")  # Debug: Print selected file path
+    cleaned = re.sub(r"^\s*(#.*|from .*|import .*)$", "", code, flags=re.MULTILINE)
+    return "\n".join([line for line in cleaned.splitlines() if line.strip()])
 
-            # Read the contents of the selected file
-            with open(file_path, "r", encoding="utf-8") as file:
-                code = file.read()
-                print(f"Code read from file:\n{code[:100]}...")  # Debug: Preview code
 
-                # Display the code in the text widget
-                code_display.delete(1.0, tk.END)  # Clear existing content
-                code_display.insert(tk.END, code)  # Insert new content
+def load_code_from_directory(directory):
+    """
+    Loads and returns code files from a specified directory.
 
-    except Exception as e:
-        # Show an error message if something goes wrong
-        messagebox.showerror("Error", f"Failed to open file: {str(e)}")
-        print(f"Error occurred: {str(e)}")
+    Parameters:
+        directory (str): Directory path to load code files from.
+
+    Returns:
+        list: A list of tuples containing file names and their code as a list of lines.
+    """
+    code_files = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.endswith((".py", ".java")):
+                file_path = os.path.join(root, file)
+                with open(file_path, "r", encoding="utf-8") as f:
+                    code_files.append((file, f.read().splitlines()))
+    return code_files
+
+
+def detect_clones_with_sensitivity(code_files):
+    """
+    Detects and classifies code clones based on current sensitivity level.
+
+    Parameters:
+        code_files (list): List of tuples containing file names and code lines.
+    """
+    global clone_results
+    clone_results.clear()
+    for file_name, lines in code_files:
+        for i, line1 in enumerate(lines):
+            for j, line2 in enumerate(lines):
+                if i != j:
+                    similarity = calculate_similarity(line1, line2)
+                    classify_clone(file_name, i, j, similarity)
+
+
+def classify_clone(file_name, line1, line2, similarity):
+    """
+    Classifies a clone based on similarity into one of three types.
+
+    Parameters:
+        file_name (str): Name of the file where the clone was detected.
+        line1 (int): First line number of the clone.
+        line2 (int): Second line number of the clone.
+        similarity (float): Calculated similarity between the two code lines.
+    """
+    if similarity >= 1.0 * (current_sensitivity / 10):
+        clone_results.append(("Type 1", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))
+    elif similarity >= 0.9 * (current_sensitivity / 10):
+        clone_results.append(("Type 2", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))
+    elif similarity >= 0.7 * (current_sensitivity / 10):
+        clone_results.append(("Type 3", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))
+
+
+def open_directory():
+    """
+    Opens a file dialog to select a directory and loads code files for display.
+    """
+    directory_path = filedialog.askdirectory(title="Select a Directory")
+    if directory_path:
+        code_files = load_code_from_directory(directory_path)
+        code_display.delete(1.0, tk.END)
+        for file_name, lines in code_files:
+            code_display.insert(tk.END, f"### {file_name} ###\n")
+            code_display.insert(tk.END, "\n".join(lines) + "\n")
+
+
+def run_clone_detection_in_thread():
+    """
+    Runs clone detection in a separate thread to prevent GUI freezing.
+    """
+    threading.Thread(target=detect_clones).start()
 
 
 def detect_clones():
     """
-    Retrieve the code from the text display widget and run clone detection.
-    Display the results in the listbox.
+    Loads code files and detects clones, then displays the results.
     """
-    code = code_display.get("1.0", tk.END)  # Get the displayed code
-    sensitivity = current_sensitivity  # Use the current sensitivity setting
+    code_files = load_code_from_directory(filedialog.askdirectory())
+    detect_clones_with_sensitivity(code_files)
+    display_clone_results()
 
-    # Perform clone detection and get the results
-    clone_results = detect_clones_with_sensitivity(code, sensitivity)
 
-    # Display the clone detection results in the listbox
-    results_listbox.delete(0, tk.END)  # Clear existing results
+def display_clone_results():
+    """
+    Displays clone detection results in the GUI's listbox.
+    """
+    results_listbox.delete(0, tk.END)
     for result in clone_results:
-        results_listbox.insert(tk.END, result)  # Add each result to the listbox
+        results_listbox.insert(tk.END, f"{result}")
 
 
-def save_report():
+def save_report_as_csv():
     """
-    Save the clone detection results to a text file.
+    Saves clone detection results as a CSV file.
     """
-    report_path = filedialog.asksaveasfilename(defaultextension=".txt", filetypes=[("Text files", "*.txt")])
+    report_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
     if report_path:
-        with open(report_path, 'w') as report_file:
-            for result in results_listbox.get(0, tk.END):
-                report_file.write(result + '\n')
+        with open(report_path, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["Clone Type", "Line 1", "Line 2", "Similarity", "File"])
+            writer.writerows(clone_results)
         messagebox.showinfo("Save Report", f"Report saved successfully at {report_path}")
+
+
+def save_report_as_pdf():
+    """
+    Saves clone detection results as a PDF file.
+    """
+    report_path = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF files", "*.pdf")])
+    if report_path:
+        pdf = FPDF()
+        pdf.add_page()
+        pdf.set_font("Arial", size=12)
+        pdf.cell(200, 10, txt="Code Clone Detection Report", ln=True, align='C')
+        pdf.ln(10)
+        pdf.set_font("Arial", size=10)
+        for clone_type, line1, line2, similarity, file_name in clone_results:
+            pdf.cell(200, 10, txt=f"{clone_type}: {file_name} - Lines {line1} and {line2} (Similarity: {similarity})",
+                     ln=True)
+        pdf.output(report_path)
+        messagebox.showinfo("Save Report", f"PDF saved successfully at {report_path}")
 
 
 def open_settings():
     """
-    Open a new window to adjust the detection sensitivity using a slider.
+    Opens settings window to adjust detection sensitivity.
     """
-    settings_window = tk.Toplevel(root)  # Create a new top-level window
+    settings_window = tk.Toplevel(root)
     settings_window.title("Settings")
-    settings_window.geometry("300x200")
-
-    # Add label and slider for sensitivity adjustment
     tk.Label(settings_window, text="Detection Sensitivity").pack(pady=10)
     sensitivity_slider = tk.Scale(settings_window, from_=1, to=10, orient=tk.HORIZONTAL)
+    sensitivity_slider.set(current_sensitivity)
     sensitivity_slider.pack(pady=10)
-
-    # Apply button to save the selected sensitivity
-    apply_button = tk.Button(settings_window, text="Apply", command=lambda: apply_settings(sensitivity_slider.get()))
-    apply_button.pack(pady=10)
+    tk.Button(settings_window, text="Apply", command=lambda: apply_settings(sensitivity_slider.get())).pack(pady=10)
 
 
 def apply_settings(sensitivity):
     """
-    Apply the selected sensitivity value and print it for debugging.
+    Applies the selected sensitivity setting to adjust clone detection threshold.
 
-    Args:
-        sensitivity (int): The new sensitivity value (1-10).
+    Parameters:
+        sensitivity (int): The selected sensitivity level (1-10).
     """
-    global current_sensitivity  # Modify the global sensitivity variable
+    global current_sensitivity
     current_sensitivity = sensitivity
-    print(f"Sensitivity set to: {sensitivity}")
 
 
 # Tkinter GUI Setup
 
-# Create the main window
 root = tk.Tk()
 root.title("Code Clone Detection Tool")
-root.geometry("800x600")  # Set the size of the main window
+root.geometry("900x700")
 
-# Text widget to display the code
-code_display = tk.Text(root, wrap="none", height=10, width=80)
+code_display = tk.Text(root, wrap="none", height=15, width=80)
 code_display.pack(padx=10, pady=10)
 
-# Listbox to display clone detection results
-results_listbox = tk.Listbox(root, height=10, width=80)
+results_listbox = tk.Listbox(root, height=15, width=80)
 results_listbox.pack(padx=10, pady=10)
 
-# Button to open a codebase
-open_button = tk.Button(root, text="Open Codebase", command=open_file)
+open_button = tk.Button(root, text="Open Codebase", command=open_directory)
 open_button.pack(pady=5)
 
-# Button to run clone detection
-run_button = tk.Button(root, text="Run Clone Detection", command=detect_clones)
+run_button = tk.Button(root, text="Run Clone Detection", command=run_clone_detection_in_thread)
 run_button.pack(pady=5)
 
-# Button to open settings for sensitivity adjustment
 settings_button = tk.Button(root, text="Settings", command=open_settings)
 settings_button.pack(pady=5)
 
-# Button to save the clone detection report
-save_button = tk.Button(root, text="Save Report", command=save_report)
-save_button.pack(pady=5)
+save_csv_button = tk.Button(root, text="Save Report as CSV", command=save_report_as_csv)
+save_csv_button.pack(pady=5)
 
-# Start the Tkinter event loop
+save_pdf_button = tk.Button(root, text="Save Report as PDF", command=save_report_as_pdf)
+save_pdf_button.pack(pady=5)
+
+progress = ttk.Progressbar(root, orient=tk.HORIZONTAL, length=300, mode='indeterminate')
+progress.pack(pady=10)
+
 root.mainloop()
