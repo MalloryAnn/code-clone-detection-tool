@@ -26,7 +26,6 @@ import re
 import csv
 from fpdf import FPDF  # Install with: pip install fpdf
 
-
 current_sensitivity = 9  # Default sensitivity for detection
 clone_results = []  # Store results of clone detection
 
@@ -34,7 +33,6 @@ clone_results = []  # Store results of clone detection
 total_exact_clones = 0  # Counter for exact clones (Type 1)
 total_renamed_clones = 0  # Counter for renamed clones (Type 2)
 total_modified_clones = 0  # Counter for modified clones (Type 3)
-
 
 
 def calculate_similarity(code1: str, code2: str) -> float:
@@ -54,7 +52,6 @@ def calculate_similarity(code1: str, code2: str) -> float:
     return difflib.SequenceMatcher(None, cleaned_code1, cleaned_code2).ratio()  # Return similarity ratio
 
 
-
 def clean_code(code: str) -> str:
     """
     Removes comments, import statements, and excess whitespace from code.
@@ -67,7 +64,6 @@ def clean_code(code: str) -> str:
     """
     cleaned = re.sub(r"^\s*(#.*|from .*|import .*)$", "", code, flags=re.MULTILINE)  # Remove comments and imports
     return "\n".join([line for line in cleaned.splitlines() if line.strip()])  # Return cleaned code
-
 
 
 def load_code_from_files(file_paths: list[str]) -> list[tuple[str, list[str]]]:
@@ -85,7 +81,6 @@ def load_code_from_files(file_paths: list[str]) -> list[tuple[str, list[str]]]:
         with open(file_path, "r", encoding="utf-8") as f:
             code_files.append((os.path.basename(file_path), f.read().splitlines()))  # Append file name and lines
     return code_files
-
 
 
 def detect_clones_with_sensitivity(code_files: list[tuple[str, list[str]]]):
@@ -113,7 +108,6 @@ def detect_clones_with_sensitivity(code_files: list[tuple[str, list[str]]]):
                         classify_clone(file_name, i, j, 0.75)  # Threshold for modified clones
 
 
-
 def is_renamed_clone(line1: str, line2: str) -> bool:
     """
     Determines if line1 is a renamed version of line2.
@@ -127,7 +121,6 @@ def is_renamed_clone(line1: str, line2: str) -> bool:
     """
     # Logic to compare structures while ignoring variable names will go here
     return False  # Placeholder for actual implementation
-
 
 
 def is_modified_clone(line1: str, line2: str) -> bool:
@@ -145,10 +138,9 @@ def is_modified_clone(line1: str, line2: str) -> bool:
     return False  # Placeholder for actual implementation
 
 
-
 def classify_clone(file_name: str, line1: int, line2: int, similarity: float):
     """
-    Classifies a clone based on similarity into one of three types.
+    Classifies a clone based on similarity exclusively based on the slider setting.
 
     Parameters:
         file_name (str): Name of the file where the clone was detected.
@@ -156,18 +148,22 @@ def classify_clone(file_name: str, line1: int, line2: int, similarity: float):
         line2 (int): Second line number of the clone.
         similarity (float): Calculated similarity between the two code lines.
     """
-    global total_exact_clones, total_renamed_clones, total_modified_clones  # Track total counts
+    global total_exact_clones, total_renamed_clones, total_modified_clones
 
-    if similarity >= 1.0 * (current_sensitivity / 10):  # Check for exact clones
-        clone_results.append(("Type 1", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))  # Add result
-        total_exact_clones += 1  # Increment counter for exact clones
-    elif similarity >= 0.9 * (current_sensitivity / 10):  # Check for renamed clones
-        clone_results.append(("Type 2", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))  # Add result
-        total_renamed_clones += 1  # Increment counter for renamed clones
-    elif similarity >= 0.7 * (current_sensitivity / 10):  # Check for modified clones
-        clone_results.append(("Type 3", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))  # Add result
-        total_modified_clones += 1  # Increment counter for modified clones
+    # Convert current sensitivity from percentage to decimal
+    threshold = current_sensitivity / 100.0
 
+    # Adjust logic to ensure exclusive detection
+    if threshold == 1.0 and similarity == 1.0:  # Type 1 clones only at 100% threshold
+        clone_results.append(("Type 1", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))
+        total_exact_clones += 1
+    elif threshold == 0.9 and 0.9 <= similarity < 1.0:  # Type 2 clones only at 90% threshold
+        clone_results.append(("Type 2", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))
+        total_renamed_clones += 1
+
+    elif threshold == 0.7 and 0.7 <= similarity < 0.9:  # Type 3 clones only at 70% threshold
+        clone_results.append(("Type 3", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))
+        total_modified_clones += 1
 
 
 def open_code_files():
@@ -188,13 +184,11 @@ def open_code_files():
         messagebox.showwarning("Warning", "No files selected.")  # Warning if no files selected
 
 
-
 def run_clone_detection_in_thread():
     """
     Runs clone detection in a separate thread to prevent GUI freezing.
     """
     threading.Thread(target=detect_clones).start()  # Start detection in a new thread
-
 
 
 def detect_clones():
@@ -217,7 +211,6 @@ def detect_clones():
         messagebox.showwarning("Warning", "No files selected.")  # Warning if no files selected
 
 
-
 def display_clone_results():
     """
     Displays clone detection results in the GUI's listbox.
@@ -225,7 +218,6 @@ def display_clone_results():
     results_listbox.delete(0, tk.END)  # Clear previous results
     for result in clone_results:
         results_listbox.insert(tk.END, f"{result}")  # Insert each result into the listbox
-
 
 
 def save_report_as_csv():
@@ -245,7 +237,6 @@ def save_report_as_csv():
             writer.writerow(["Total Renamed Clones", total_renamed_clones])  # Total renamed clones
             writer.writerow(["Total Modified Clones", total_modified_clones])  # Total modified clones
         messagebox.showinfo("Save Report", f"Report saved successfully at {report_path}")  # Confirmation message
-
 
 
 def save_report_as_pdf():
@@ -268,7 +259,6 @@ def save_report_as_pdf():
         messagebox.showinfo("Save Report", f"PDF saved successfully at {report_path}")  # Confirmation message
 
 
-
 def recommend_refactoring():
     """
     Generates recommendations for refactoring based on detected clones.
@@ -288,7 +278,6 @@ def recommend_refactoring():
     return recommendations  # Return list of recommendations
 
 
-
 def open_settings():
     """
     Opens settings window to adjust detection sensitivity.
@@ -303,7 +292,6 @@ def open_settings():
         pady=10)  # Button to apply settings
 
 
-
 def apply_settings(sensitivity):
     """
     Applies the selected sensitivity setting to adjust clone detection threshold.
@@ -314,36 +302,48 @@ def apply_settings(sensitivity):
     global current_sensitivity
     current_sensitivity = sensitivity  # Update current sensitivity level
 
-
 # Tkinter GUI Setup
-root = tk.Tk()  # Create main window
-
-root.title("Code Clone Detection Tool")  # Set window title
-root.geometry("900x700")  # Set window size
+root = tk.Tk()
+root.title("Code Clone Detection Tool")
+root.geometry("900x900")
 
 # Text area to display code
 code_display = tk.Text(root, wrap="none", height=15, width=80)
-code_display.pack(padx=10, pady=10)  # Pack the text area into the window
+code_display.pack(padx=10, pady=10)
 
 # Listbox to display detection results
 results_listbox = tk.Listbox(root, height=15, width=80)
-results_listbox.pack(padx=10, pady=10)  # Pack the listbox into the window
+results_listbox.pack(padx=10, pady=10)
 
 # Buttons for various actions
 open_button = tk.Button(root, text="Open Code Files", command=open_code_files)
-open_button.pack(pady=5)  # Button to open code files
+open_button.pack(pady=5)
 
 run_button = tk.Button(root, text="Run Clone Detection", command=run_clone_detection_in_thread)
-run_button.pack(pady=5)  # Button to run clone detection
+run_button.pack(pady=5)
 
-settings_button = tk.Button(root, text="Settings", command=open_settings)
-settings_button.pack(pady=5)  # Button to open settings
+
+# Add similarity slider directly to the main GUI
+tk.Label(root, text="Detection Similarity Scale: Select BEFORE choosing the file").pack(pady=10)  # Clearer label for slider
+similarity_slider = tk.Scale(root, from_=10, to=100, orient=tk.HORIZONTAL, resolution=10)  # Slider for similarity scale
+similarity_slider.set(70)  # Default to 70% similarity
+similarity_slider.pack(pady=10)  # Add slider to GUI
+
+# Apply button to update similarity threshold
+def update_similarity():
+    global current_sensitivity
+    current_sensitivity = similarity_slider.get()  # Update similarity to the selected value
+    messagebox.showinfo("Similarity Updated", f"Detection Similarity set to: {current_sensitivity}%")
+
+apply_button = tk.Button(root, text="Apply Detection Similarity", command=update_similarity)
+apply_button.pack(pady=5)  # Add Apply button to GUI
+
 
 save_csv_button = tk.Button(root, text="Save Report as CSV", command=save_report_as_csv)
-save_csv_button.pack(pady=5)  # Button to save report as CSV
+save_csv_button.pack(pady=5)
 
 save_pdf_button = tk.Button(root, text="Save Report as PDF", command=save_report_as_pdf)
-save_pdf_button.pack(pady=5)  # Button to save report as PDF
+save_pdf_button.pack(pady=5)
 
 progress = ttk.Progressbar(root, orient=tk.HORIZONTAL, length=300, mode='indeterminate')
 progress.pack(pady=10)  # Progress bar for visual feedback
