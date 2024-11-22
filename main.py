@@ -34,6 +34,8 @@ total_exact_clones = 0  # Counter for exact clones (Type 1)
 total_renamed_clones = 0  # Counter for renamed clones (Type 2)
 total_modified_clones = 0  # Counter for modified clones (Type 3)
 
+marked_clones = []  # Global list to store clones marked for refactoring
+
 
 def calculate_similarity(code1: str, code2: str) -> float:
     """
@@ -77,6 +79,63 @@ def clean_code(code: str) -> str:
     return "\n".join([line for line in cleaned.splitlines() if line.strip()])  # Return cleaned code
 
 
+def view_marked_clones():
+    """
+    Opens a window displaying all clones marked for refactoring.
+    """
+    if not marked_clones:
+        messagebox.showinfo("No Marked Clones", "No clones have been marked for refactoring.")
+        return
+
+    # Create a new window to display marked clones
+    marked_window = tk.Toplevel(root)
+    marked_window.title("Marked Clones for Refactoring")
+    marked_window.geometry("600x400")
+
+    # Add a title
+    tk.Label(marked_window, text="Marked Clones for Refactoring", font=("Arial", 14, "bold")).pack(pady=5)
+
+    # Add a listbox to display marked clones
+    marked_listbox = tk.Listbox(marked_window, width=80, height=20)
+    marked_listbox.pack(padx=10, pady=10)
+
+    # Populate the listbox with marked clones
+    for i, clone in enumerate(marked_clones, start=1):
+        marked_listbox.insert(tk.END, f"{i}. Clone Type: {clone['type']}, File: {clone['file']}, "
+                                      f"Lines: {clone['lines']}, Similarity: {clone['similarity']}")
+
+    # Add a close button
+    close_button = tk.Button(marked_window, text="Close", command=marked_window.destroy)
+    close_button.pack(pady=5)
+
+
+def save_marked_clones():
+    """
+    Saves the marked clones for refactoring to a CSV file.
+    """
+    if not marked_clones:
+        messagebox.showinfo("No Marked Clones", "No clones have been marked for refactoring.")
+        return
+
+    # Open a file dialog to select the save location
+    save_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
+    if not save_path:
+        return  # User canceled the save dialog
+
+    try:
+        # Write the marked clones to a CSV file
+        with open(save_path, "w", newline="") as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(["Clone Type", "File", "Line Range", "Similarity"])
+            for clone in marked_clones:
+                # Add quotes around the line range to avoid Excel interpreting it as a date
+                line_range = f'"{clone["lines"]}"'  # Force text format
+                writer.writerow([clone["type"], clone["file"], line_range, clone["similarity"]])
+        messagebox.showinfo("Success", f"Marked clones saved to {save_path}.")
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to save marked clones: {e}")
+
+
 def load_code_from_files(file_paths: list[str]) -> list[tuple[str, list[str]]]:
     """
     Loads and returns code from specified files.
@@ -95,32 +154,19 @@ def load_code_from_files(file_paths: list[str]) -> list[tuple[str, list[str]]]:
 
 
 def detect_clones_with_sensitivity(code_files: list[tuple[str, list[str]]]):
-    """
-    Detects clones with sensitivity adjustments, including renamed and modified clones.
-
-    Parameters:
-        code_files (list[tuple[str, list[str]]]): List of code files to analyze.
-    """
     global clone_results
     clone_results.clear()  # Clear previous results
+    similarity_threshold = similarity_slider.get() / 100  # Convert slider value to decimal
 
-    for file_path, lines in code_files:  # Iterate over each file and its lines
-        file_name = os.path.abspath(file_path)  # Get absolute file path
-        for i, line1 in enumerate(lines):  # Compare each line to others
+    for file_name, lines in code_files:
+        for i, line1 in enumerate(lines):
             for j, line2 in enumerate(lines):
-                if i >= j:  # Avoid duplicate comparisons
+                if i >= j:
                     continue
 
-                cleaned_line1 = clean_code(line1)
-                cleaned_line2 = clean_code(line2)
-
-                # Skip if either line is empty after cleaning
-                if not cleaned_line1.strip() or not cleaned_line2.strip():
-                    continue
-
-                # Calculate exact similarity
                 similarity = calculate_similarity(line1, line2)
-                classify_clone(file_name, i, j, similarity)  # Classify based on similarity
+                if similarity >= similarity_threshold:
+                    classify_clone(file_name, i, j, similarity)
 
 
 def is_renamed_clone(line1: str, line2: str) -> bool:
@@ -205,26 +251,33 @@ def open_code_files():
             code_display.insert(tk.END, "\n".join(lines) + "\n")  # Display code lines
     else:
         messagebox.showwarning("Warning", "No files selected.")  # Warning if no files selected
+    root.update_idletasks()  # Refresh the GUI after action
 
 
 def load_clone_for_editing():
     """
     Loads the selected clone from the results list into the editor for modification.
+    Ensures the file exists and prompts the user to locate missing files.
     """
-    # Get the selected item from the results listbox
     selected_index = results_listbox.curselection()
     if not selected_index:
         messagebox.showwarning("No Selection", "Please select a clone from the list.")
         return
 
-    # Parse the selected result
     selected_clone = results_listbox.get(selected_index[0])
     try:
         clone_type, line1, line2, similarity, file_name = eval(selected_clone)
 
         # Check if the file exists
         if not os.path.exists(file_name):
-            raise FileNotFoundError(f"File not found: {file_name}")
+            # Prompt the user to locate the missing file
+            file_name = filedialog.askopenfilename(
+                title=f"Locate Missing File: {file_name}",
+                filetypes=[("Python Files", "*.py"), ("Java Files", "*.java")]
+            )
+            if not file_name:
+                messagebox.showwarning("File Missing", "The file could not be found or opened.")
+                return
 
         # Load the corresponding code snippet into the editor
         with open(file_name, "r") as file:
@@ -235,19 +288,94 @@ def load_clone_for_editing():
             raise IndexError(f"Line numbers out of range. File has {len(lines)} lines.")
 
         # Extract clone lines
-        clone_code = "".join(lines[line1 - 1:line2])
+        clone_code = "".join(lines[int(line1) - 1:int(line2)])
         clone_editor.delete(1.0, tk.END)  # Clear the editor
         clone_editor.insert(tk.END, clone_code)  # Insert clone code into the editor
 
     except FileNotFoundError as e:
         print(f"Error: {e}")
-        messagebox.showerror("Error", f"File not found: {file_name}. Please check the file path.")
+        messagebox.showerror("Error", f"File not found. Please check the file path.")
     except IndexError as e:
         print(f"Error: {e}")
         messagebox.showerror("Error", f"Invalid line numbers: {line1}-{line2}. Please check the clone details.")
     except Exception as e:
         print(f"Unexpected error: {e}")
         messagebox.showerror("Error", "Failed to load the selected clone. Please check the file and clone details.")
+
+def view_clone_details():
+    """
+    Opens a detailed view window for the selected clone, including refactoring suggestions.
+    """
+    # Get the selected item from the results listbox
+    selected_index = results_listbox.curselection()
+    if not selected_index:
+        messagebox.showwarning("No Selection", "Please select a clone from the list.")
+        return
+
+    # Parse the selected result
+    selected_clone = results_listbox.get(selected_index[0])
+    print(f"Debug: Raw selected item: {selected_clone}")
+
+    try:
+        # Adjust parsing logic to handle actual format
+        clone_type, line1, line2, similarity, file_name = eval(selected_clone)
+
+        # Create a new window for clone details
+        details_window = tk.Toplevel(root)
+        details_window.title("Clone Details")
+        details_window.geometry("500x400")
+
+        # Display clone details
+        tk.Label(details_window, text="Clone Details", font=("Arial", 14, "bold")).pack(pady=5)
+        details_text = (
+            f"Clone Type: {clone_type}\n"
+            f"File: {file_name}\n"
+            f"Line Range: {line1} - {line2}\n"
+            f"Similarity: {similarity}\n"
+        )
+        tk.Label(details_window, text=details_text, justify="left").pack(pady=5)
+
+        # Add refactoring suggestions
+        tk.Label(details_window, text="Refactoring Suggestions", font=("Arial", 12, "bold")).pack(pady=5)
+        if clone_type == "Type 1":
+            suggestion = "Remove exact duplicates by refactoring or consolidating repeated code."
+        elif clone_type == "Type 2":
+            suggestion = "Rename variables and parameters to avoid redundancy."
+        elif clone_type == "Type 3":
+            suggestion = "Refactor similar logic into reusable functions or classes."
+        else:
+            suggestion = "No specific suggestion available."
+        tk.Label(details_window, text=suggestion, wraplength=400, justify="left").pack(pady=5)
+
+        # Add a "Mark for Refactoring" button
+        def mark_for_refactoring():
+            """
+            Marks the selected clone for refactoring and stores it in the global list.
+            """
+            global marked_clones
+
+            # Create a dictionary of the clone details
+            marked_clone = {
+                "type": clone_type,
+                "file": file_name,
+                "lines": f"{line1} - {line2}",
+                "similarity": similarity
+            }
+
+            # Add the marked clone to the global list
+            marked_clones.append(marked_clone)
+
+            # Display confirmation to the user
+            messagebox.showinfo("Marked", f"Clone marked for refactoring:\n\n{details_text}")
+            print(f"Debug: Marked clone added: {marked_clone}")  # Debugging output
+
+        mark_button = tk.Button(details_window, text="Mark for Refactoring", command=mark_for_refactoring)
+        mark_button.pack(pady=10)
+
+    except Exception as e:
+        print(f"Error: {e}")
+        messagebox.showerror("Error", "Failed to load clone details. Please check the selected item.")
+
 
 
 def save_modified_code():
@@ -315,6 +443,7 @@ def apply_filters():
     Filters clone detection results based on the selected clone type and similarity threshold.
     """
     filtered_results = []  # List to store filtered results
+    similarity_threshold = similarity_slider.get()  # Get the slider's current value
 
     for clone_type, line1, line2, similarity, file_name in clone_results:
         # Filter by clone type
@@ -322,7 +451,7 @@ def apply_filters():
             continue  # Skip if the clone type doesn't match the selected type
 
         # Filter by similarity threshold
-        if float(similarity.strip('%')) < similarity_threshold_filter.get():
+        if float(similarity.strip('%')) < similarity_threshold:
             continue  # Skip if similarity is below the threshold
 
         # Add result to filtered list
@@ -332,6 +461,7 @@ def apply_filters():
     results_listbox.delete(0, tk.END)  # Clear the listbox
     for result in filtered_results:
         results_listbox.insert(tk.END, f"{result}")
+
 
 
 def add_filters_to_gui():
@@ -377,23 +507,26 @@ def save_report_as_csv():
         with open(report_path, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
             # Write header row with Recommendations
-            writer.writerow(["Clone Type", "Line 1", "Line 2", "Similarity", "File", "Recommendations"])
+            writer.writerow(["Clone Type", "Line 1", "Line 2", "Similarity", "File Path", "Recommendations"])  # Updated header
 
             # Generate and write recommendations for each clone
             for clone in clone_results:
                 clone_type, line1, line2, similarity, file_name = clone
-                # Use existing recommend_refactoring logic
+                # Use the absolute file path to avoid issues when reopening the report
+                full_path = os.path.abspath(file_name)
+
+                # Generate recommendations
                 if clone_type == "Type 1":
-                    recommendation = f"Consider removing exact duplicates in {file_name} at lines {line1} and {line2}."
+                    recommendation = f"Consider removing exact duplicates in {full_path} at lines {line1} and {line2}."
                 elif clone_type == "Type 2":
-                    recommendation = f"Rename variables in {file_name} to avoid redundancy at lines {line1} and {line2}."
+                    recommendation = f"Rename variables in {full_path} to avoid redundancy at lines {line1} and {line2}."
                 elif clone_type == "Type 3":
-                    recommendation = f"Consolidate similar code in {file_name} found at lines {line1} and {line2}."
+                    recommendation = f"Consolidate similar code in {full_path} found at lines {line1} and {line2}."
                 else:
                     recommendation = "No recommendation available."
 
                 # Write clone result with recommendation
-                writer.writerow([clone_type, line1, line2, similarity, file_name, recommendation])
+                writer.writerow([clone_type, line1, line2, similarity, full_path, recommendation])  # Save full file path
 
             # Add metrics section
             writer.writerow([])  # Add empty row for separation
@@ -444,40 +577,134 @@ def recommend_refactoring():
                 f"Consolidate similar code in {file_name} found at lines {line1} and {line2}.")  # Recommendation for Type 3
     return recommendations  # Return list of recommendations
 
-
-def open_settings():
+def open_clone_report():
     """
-    Opens settings window to adjust detection sensitivity.
+    Opens a previously saved clone detection report (CSV file) and displays its content in the results listbox.
     """
-    settings_window = tk.Toplevel(root)  # Create a new window for settings
-    settings_window.title("Settings")  # Set window title
-    tk.Label(settings_window, text="Detection Sensitivity").pack(pady=10)  # Label for sensitivity slider
-    sensitivity_slider = tk.Scale(settings_window, from_=1, to=10, orient=tk.HORIZONTAL)  # Create slider
-    sensitivity_slider.set(current_sensitivity)  # Set slider to current sensitivity
-    sensitivity_slider.pack(pady=10)  # Pack the slider into the window
-    tk.Button(settings_window, text="Apply", command=lambda: apply_settings(sensitivity_slider.get())).pack(
-        pady=10)  # Button to apply settings
+    # Open a file dialog to select the report file
+    report_path = filedialog.askopenfilename(
+        title="Select Clone Report",
+        filetypes=[("CSV files", "*.csv")]
+    )
 
+    if not report_path:  # Check if a file was selected
+        messagebox.showwarning("No File Selected", "Please select a clone report file.")
+        return
 
-def apply_settings(sensitivity):
+    try:
+        # Read the report file
+        with open(report_path, "r", newline="") as csvfile:
+            reader = csv.reader(csvfile)
+            next(reader)  # Skip the header row
+
+            # Clear existing results and load the new ones
+            results_listbox.delete(0, tk.END)  # Clear the listbox
+            for row in reader:
+                # Ensure the row has the expected structure
+                if len(row) >= 5:  # Expected structure: Clone Type, Line 1, Line 2, Similarity, File
+                    clone_type, line1, line2, similarity, file_name = row[:5]
+
+                    # Format the row into a tuple-like string that matches the expected format
+                    formatted_result = f"('{clone_type}', {line1}, {line2}, '{similarity}', '{file_name}')"
+                    results_listbox.insert(tk.END, formatted_result)
+
+        # Confirmation message
+        messagebox.showinfo("Success", "Clone report loaded successfully.")
+    except Exception as e:
+        print(f"Error: {e}")
+        messagebox.showerror("Error", "Failed to load the clone report. Please check the file format and try again.")
+
+def open_instructions():
     """
-    Applies the selected sensitivity setting to adjust clone detection threshold.
-
-    Parameters:
-        sensitivity (int): The selected sensitivity level (1-10).
+    Opens a window displaying instructions for using the Code Clone Detection Tool.
     """
-    global current_sensitivity
-    current_sensitivity = sensitivity  # Update current sensitivity level
+    instructions_window = tk.Toplevel(root)
+    instructions_window.title("Instructions")
+    instructions_window.geometry("700x700")
 
+    # Create a Text widget to display instructions
+    text_widget = tk.Text(instructions_window, wrap="word", height=40, width=70)
+    text_widget.pack(padx=10, pady=10)
+
+    # Insert instructions into the Text widget with formatting
+    text_widget.insert(tk.END, "Welcome to the Code Clone Detection Tool!\n\n", "bold")
+    text_widget.insert(tk.END, "This tool helps you detect, analyze, and refactor code clones in Python or Java files. Follow these steps to navigate and utilize the features effectively:\n\n")
+
+    text_widget.insert(tk.END, "Step 1: Set Similarity Threshold\n", "bold")
+    text_widget.insert(tk.END, "1. Adjust Similarity Slider: Use the Detection Similarity Scale slider at the bottom of the GUI. Set the threshold (e.g., 100% for exact matches, 70% for broader matches).\n")
+    text_widget.insert(tk.END, "2. Click Apply Detection Similarity to confirm your setting.\n\n")
+
+    text_widget.insert(tk.END, "Step 2: Load Your Code Files\n", "bold")
+    text_widget.insert(tk.END, "1. Click Open Code File to load your Python or Java files.\n")
+    text_widget.insert(tk.END, "2. Select one or more files from your system. The files will be displayed in the Code Display section.\n\n")
+
+    text_widget.insert(tk.END, "Step 3: Run Clone Detection\n", "bold")
+    text_widget.insert(tk.END, "1. Click Run Clone Detection to analyze the loaded files for code clones.\n")
+    text_widget.insert(tk.END, "2. Detected clones will be listed in the Detection Results section, showing Clone Type, Line Range, Similarity, and File Path.\n\n")
+
+    text_widget.insert(tk.END, "Step 4: Review Clones\n", "bold")
+    text_widget.insert(tk.END, "1. Use Filter Results by Clone Type to view specific clone types or all results.\n")
+    text_widget.insert(tk.END, "2. Select a clone and click View Clone Details to see detailed information and refactoring suggestions.\n\n")
+
+    text_widget.insert(tk.END, "Step 5: Mark Clones for Refactoring\n", "bold")
+    text_widget.insert(tk.END, "1. In the Clone Details window, click Mark for Refactoring to tag the clone.\n")
+    text_widget.insert(tk.END, "2. Save Marked Clones: Click Save Marked Clones to save the marked clones to a CSV file.\n\n")
+
+    text_widget.insert(tk.END, "Step 6: Edit and Refactor Clones\n", "bold")
+    text_widget.insert(tk.END, "1. Select a clone and click Load Clone for Editing.\n")
+    text_widget.insert(tk.END, "2. Modify the code in the editor.\n")
+    text_widget.insert(tk.END, "3. Click Save Changes to save the modifications and rerun clone detection.\n\n")
+
+    text_widget.insert(tk.END, "Step 7: Open Previously Saved Reports\n", "bold")
+    text_widget.insert(tk.END, "1. Click Open Previously Saved Report to load a CSV report.\n")
+    text_widget.insert(tk.END, "2. Review the clones from the report in the Detection Results section.\n\n")
+
+    text_widget.insert(tk.END, "Step 8: Save Clone Reports\n", "bold")
+    text_widget.insert(tk.END, "1. Click Save Report as CSV or Save Report as PDF to export clone detection results.\n\n")
+
+    text_widget.insert(tk.END, "Tips for Best Results\n", "bold")
+    text_widget.insert(tk.END, "- Ensure files are accessible and properly formatted.\n")
+    text_widget.insert(tk.END, "- Use refactoring suggestions to improve code quality.\n")
+    text_widget.insert(tk.END, "- Mark clones for refactoring to track necessary changes.\n\n")
+
+    text_widget.insert(tk.END, "Clone Types Explained\n", "bold")
+    text_widget.insert(tk.END, "- Type 1: Exact clones (100% similarity).\n")
+    text_widget.insert(tk.END, "- Type 2: Renamed clones (90%-99% similarity).\n")
+    text_widget.insert(tk.END, "- Type 3: Modified clones (70%-89% similarity).\n\n")
+
+    text_widget.insert(tk.END, "Happy Coding!\n", "bold")
+
+    # Add bold formatting
+    text_widget.tag_configure("bold", font=("Arial", 10, "bold"))
+    text_widget.config(state="disabled")  # Make the text read-only
+
+    # Add a Close button
+    close_button = tk.Button(instructions_window, text="Close", command=instructions_window.destroy)
+    close_button.pack(pady=10)
+
+
+def handle_button_action(action):
+    """
+    Handles button actions and ensures proper focus and event triggering.
+    """
+    try:
+        action()  # Call the button's associated function
+    except Exception as e:
+        print(f"Error executing action: {e}")
+        messagebox.showerror("Error", f"An error occurred: {e}")
 
 # Tkinter GUI Setup
 root = tk.Tk()
+
+# Add the Instructions button to the main GUI
+instructions_button = tk.Button(root, text="Instructions", command=open_instructions)
+instructions_button.pack(pady=5)
 # Filter variables for GUI
 selected_clone_type = tk.StringVar(value="All")  # Default to "All"
 similarity_threshold_filter = tk.DoubleVar(value=0.0)  # Default to 0.0%
 
 root.title("Code Clone Detection Tool")
-root.geometry("900x950")
+root.geometry("900x990")
 # Text area to display code
 code_display = tk.Text(root, wrap="none", height=10, width=100)
 code_display.pack(padx=10, pady=10)
@@ -492,11 +719,20 @@ clone_editor = tk.Text(root, height=10, width=100)
 clone_editor.pack(pady=5)
 
 # Buttons for editing actions
-load_clone_button = tk.Button(root, text="Load Clone for Editing", command=load_clone_for_editing)
-load_clone_button.pack(pady=5)
+button_frame = tk.Frame(root)  # Create a frame to organize buttons
+button_frame.pack(pady=10)
 
-save_changes_button = tk.Button(root, text="Save Changes", command=save_modified_code)
-save_changes_button.pack(pady=5)
+load_clone_button = tk.Button(button_frame, text="Load Clone for Editing", command=load_clone_for_editing)
+load_clone_button.grid(row=0, column=0, padx=5, pady=5)
+
+view_details_button = tk.Button(button_frame, text="View Clone Details", command=view_clone_details)
+view_details_button.grid(row=0, column=1, padx=5, pady=5)
+
+open_saved_button = tk.Button(button_frame, text="Open Previously Saved Report", command=open_clone_report)
+open_saved_button.grid(row=0, column=2, padx=5, pady=5)
+
+save_changes_button = tk.Button(button_frame, text="Save Changes", command=save_modified_code)
+save_changes_button.grid(row=0, column=3, padx=5, pady=5)
 
 # Dropdown for filtering by clone type
 selected_clone_type = tk.StringVar(value="All")  # Default to "All"
@@ -506,18 +742,34 @@ type_filter = tk.OptionMenu(root, selected_clone_type, "All", "Type 1", "Type 2"
 type_filter.pack(pady=5)
 
 # Buttons for various actions
-open_button = tk.Button(root, text="Open Code Files", command=open_code_files)
+open_button = tk.Button(root, text="Open Code File", command=open_code_files)
 open_button.pack(pady=5)
 
 run_button = tk.Button(root, text="Run Clone Detection", command=run_clone_detection_in_thread)
 run_button.pack(pady=5)
 
 # Add similarity slider directly to the main GUI
-tk.Label(root, text="Detection Similarity Scale: Select BEFORE choosing the file").pack(
-    pady=10)  # Clearer label for slider
-similarity_slider = tk.Scale(root, from_=10, to=100, orient=tk.HORIZONTAL, resolution=10)  # Slider for similarity scale
+tk.Label(root, text="Detection Similarity Scale: Select BEFORE running the clone detection").pack(pady=10)  # Clearer label for slider
+
+similarity_slider = tk.Scale(
+    root,
+    from_=10,  # Minimum similarity
+    to=100,  # Maximum similarity
+    orient=tk.HORIZONTAL,
+    resolution=10,  # Slider steps in increments of 10
+    command=lambda _: apply_filters()  # Call apply_filters whenever the slider is adjusted
+)
 similarity_slider.set(70)  # Default to 70% similarity
 similarity_slider.pack(pady=10)  # Add slider to GUI
+
+
+
+# Add the View Marked Clones button
+view_marked_button = tk.Button(root, text="View Marked Clones", command=view_marked_clones)
+view_marked_button.pack(pady=5)
+
+save_marked_button = tk.Button(root, text="Save Marked Clones", command=save_marked_clones)
+save_marked_button.pack(pady=5)
 
 
 # Apply button to update similarity threshold
@@ -541,4 +793,3 @@ progress.pack(pady=10)  # Progress bar for visual feedback
 
 # Start the Tkinter event loop
 root.mainloop()
-
