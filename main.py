@@ -154,19 +154,29 @@ def load_code_from_files(file_paths: list[str]) -> list[tuple[str, list[str]]]:
 
 
 def detect_clones_with_sensitivity(code_files: list[tuple[str, list[str]]]):
+    """
+    Detects clones in the provided files and updates clone results.
+    Resets results and recalculates counters after processing.
+    """
     global clone_results
-    clone_results.clear()  # Clear previous results
-    similarity_threshold = similarity_slider.get() / 100  # Convert slider value to decimal
+
+    # Clear previous results
+    clone_results.clear()
+
+    # Sensitivity threshold
+    similarity_threshold = similarity_slider.get() / 100
 
     for file_name, lines in code_files:
         for i, line1 in enumerate(lines):
             for j, line2 in enumerate(lines):
                 if i >= j:
                     continue
-
                 similarity = calculate_similarity(line1, line2)
                 if similarity >= similarity_threshold:
                     classify_clone(file_name, i, j, similarity)
+
+    # Update counters after classification
+    update_counters()
 
 
 def is_renamed_clone(line1: str, line2: str) -> bool:
@@ -198,10 +208,9 @@ def is_modified_clone(line1: str, line2: str) -> bool:
     # Logic for detecting slight modifications should go here
     return False  # Placeholder for actual implementation
 
-
 def classify_clone(file_name: str, line1: int, line2: int, similarity: float):
     """
-    Classifies a clone based on similarity.
+    Classifies a clone based on similarity and appends it to the results list.
 
     Parameters:
         file_name (str): Name of the file where the clone was detected.
@@ -209,30 +218,41 @@ def classify_clone(file_name: str, line1: int, line2: int, similarity: float):
         line2 (int): Second line number of the clone.
         similarity (float): Calculated similarity between the two code lines.
     """
-    global total_exact_clones, total_renamed_clones, total_modified_clones
-
     # Avoid duplicate or reversed comparisons
     if line1 >= line2:
-        print(f"Debug: Skipping redundant comparison between lines {line1 + 1} and {line2 + 1}")
         return
 
     # Type 1 clones: Exact matches
-    # Relax the condition for Type 1 clones to allow minor floating-point differences
-    if 0.99 <= similarity <= 1.0:  # Type 1 clones: Near-exact matches treated as exact
-        print(f"Debug: Classifying Type 1 clone between lines {line1 + 1} and {line2 + 1} in {file_name}")
+    if 0.99 <= similarity <= 1.0:  # Exact clones
         clone_results.append(("Type 1", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))
-        total_exact_clones += 1
-
     # Type 2 clones: Renamed
-    elif 0.8 <= similarity < 1.0:
-        print(f"Debug: Classifying Type 2 clone with similarity {similarity:.2%}")
+    elif 0.8 <= similarity < 1.0:  # Renamed clones
         clone_results.append(("Type 2", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))
-        total_renamed_clones += 1
     # Type 3 clones: Modified
-    elif 0.7 <= similarity < 0.8:
-        print(f"Debug: Classifying Type 3 clone with similarity {similarity:.2%}")
+    elif 0.7 <= similarity < 0.8:  # Modified clones
         clone_results.append(("Type 3", line1 + 1, line2 + 1, f"{similarity:.2%}", file_name))
-        total_modified_clones += 1
+
+
+def update_counters():
+    """
+    Updates the global counters for total clones based on the current results.
+    """
+    global total_exact_clones, total_renamed_clones, total_modified_clones
+
+    # Reset counters
+    total_exact_clones = 0
+    total_renamed_clones = 0
+    total_modified_clones = 0
+
+    # Recalculate counters based on the current clone results
+    for clone in clone_results:
+        clone_type = clone[0]
+        if clone_type == "Type 1":
+            total_exact_clones += 1
+        elif clone_type == "Type 2":
+            total_renamed_clones += 1
+        elif clone_type == "Type 3":
+            total_modified_clones += 1
 
 
 def open_code_files():
@@ -782,11 +802,17 @@ def update_similarity():
 apply_button = tk.Button(root, text="Apply Detection Similarity", command=update_similarity)
 apply_button.pack(pady=5)  # Add Apply button to GUI
 
-save_csv_button = tk.Button(root, text="Save Report as CSV", command=save_report_as_csv)
-save_csv_button.pack(pady=5)
+# Create a frame to hold the Save buttons
+save_buttons_frame = tk.Frame(root)
+save_buttons_frame.pack(pady=5)
 
-save_pdf_button = tk.Button(root, text="Save Report as PDF", command=save_report_as_pdf)
-save_pdf_button.pack(pady=5)
+# Add the Save buttons to the frame
+save_csv_button = tk.Button(save_buttons_frame, text="Save Report as CSV", command=save_report_as_csv)
+save_csv_button.grid(row=0, column=0, padx=5)
+
+save_pdf_button = tk.Button(save_buttons_frame, text="Save Report as PDF", command=save_report_as_pdf)
+save_pdf_button.grid(row=0, column=1, padx=5)
+
 
 progress = ttk.Progressbar(root, orient=tk.HORIZONTAL, length=300, mode='indeterminate')
 progress.pack(pady=10)  # Progress bar for visual feedback
