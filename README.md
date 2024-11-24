@@ -27,8 +27,6 @@ Clone Reports: Generates detailed reports of detected clones.
 3. Use Open Codebase option to load your Python or Java project
 4. Run Code Clone Detection to identify code clones
 
-<img src="./terminal_run.png" alt="Screenshot of terminal run sample" width="500"/>
-<img src="./GUI_prototype.png" alt="Screenshot of GUI prototype sample run" width="500" height="500"/>
 
 # Contributers
 Demetrio Deanda (@ddean09) - Collaborator                                          
