@@ -10,11 +10,6 @@ It uses Tkinter for the GUI, allowing users to:
 
 Detection sensitivity is controlled by a slider in the settings window, which allows users to define
 how strict the similarity threshold should be for clone classification.
-
-Clone detection types:
-- Type 1: 100% similarity.
-- Type 2: 90% similarity.
-- Type 3: 70% similarity.
 """
 
 import tkinter as tk
@@ -39,7 +34,7 @@ marked_clones = []  # Global list to store clones marked for refactoring
 
 def calculate_similarity(code1: str, code2: str) -> float:
     """
-    Calculates similarity between two pieces of code using difflib's SequenceMatcher.
+    Calculates similarity between two pieces of code using difflib SequenceMatcher.
     Cleans code strings before calculation.
 
     Parameters:
@@ -137,19 +132,13 @@ def save_marked_clones():
 
 
 def load_code_from_files(file_paths: list[str]) -> list[tuple[str, list[str]]]:
-    """
-    Loads and returns code from specified files.
-
-    Parameters:
-        file_paths (list[str]): List of file paths to load code from.
-
-    Returns:
-        list[tuple[str, list[str]]]: A list of tuples containing file names and their code as a list of lines.
-    """
-    code_files = []  # Initialize list to hold code file data
+    code_files = []
     for file_path in file_paths:
-        with open(file_path, "r", encoding="utf-8") as f:
-            code_files.append((os.path.basename(file_path), f.read().splitlines()))  # Append file name and lines
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                code_files.append((os.path.basename(file_path), f.read().splitlines()))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load {file_path}: {e}")
     return code_files
 
 
@@ -181,32 +170,22 @@ def detect_clones_with_sensitivity(code_files: list[tuple[str, list[str]]]):
 
 def is_renamed_clone(line1: str, line2: str) -> bool:
     """
-    Determines if line1 is a renamed version of line2.
-
-    Parameters:
-        line1 (str): The first line of code.
-        line2 (str): The second line of code.
-
-    Returns:
-        bool: True if line1 is a renamed version of line2, False otherwise.
+    Determines if line1 is a renamed version of line2 by comparing their structures.
     """
-    # Logic to compare structures while ignoring variable names will go here
-    return False  # Placeholder for actual implementation
+    # Normalize lines by removing variable names, keeping only structural elements
+    pattern = re.compile(r'\b\w+\b')  # Match variable names
+    normalized_line1 = re.sub(pattern, '', line1)
+    normalized_line2 = re.sub(pattern, '', line2)
+
+    return normalized_line1 == normalized_line2
 
 
 def is_modified_clone(line1: str, line2: str) -> bool:
     """
-    Determines if line1 has minor modifications compared to line2.
-
-    Parameters:
-        line1 (str): The first line of code.
-        line2 (str): The second line of code.
-
-    Returns:
-        bool: True if line1 has modifications compared to line2, False otherwise.
+    Determines if line1 is a slightly modified version of line2 using a similarity threshold.
     """
-    # Logic for detecting slight modifications should go here
-    return False  # Placeholder for actual implementation
+    similarity = difflib.SequenceMatcher(None, line1, line2).ratio()
+    return 0.7 <= similarity < 0.8
 
 def classify_clone(file_name: str, line1: int, line2: int, similarity: float):
     """
@@ -336,10 +315,13 @@ def view_clone_details():
     selected_clone = results_listbox.get(selected_index[0])
     print(f"Debug: Raw selected item: {selected_clone}")
 
+
     try:
         # Adjust parsing logic to handle actual format
         clone_type, line1, line2, similarity, file_name = eval(selected_clone)
 
+        # Generate recommendation
+        recommendation = generate_recommendation(clone_type, file_name, line1, line2)
         # Create a new window for clone details
         details_window = tk.Toplevel(root)
         details_window.title("Clone Details")
@@ -397,7 +379,6 @@ def view_clone_details():
         messagebox.showerror("Error", "Failed to load clone details. Please check the selected item.")
 
 
-
 def save_modified_code():
     """
     Saves the modified code back to the file and updates the clone detection results.
@@ -432,10 +413,8 @@ def save_modified_code():
 
 
 def run_clone_detection_in_thread():
-    """
-    Runs clone detection in a separate thread to prevent GUI freezing.
-    """
-    threading.Thread(target=detect_clones).start()  # Start detection in a new thread
+    progress.start()
+    threading.Thread(target=detect_clones).start()
 
 
 def detect_clones():
@@ -526,7 +505,8 @@ def save_report_as_csv():
     if report_path:
         with open(report_path, 'w', newline='') as csvfile:
             writer = csv.writer(csvfile)
-            # Write header row with Recommendations
+
+        # Write header row with Recommendations
             writer.writerow(["Clone Type", "Line 1", "Line 2", "Similarity", "File Path", "Recommendations"])  # Updated header
 
             # Generate and write recommendations for each clone
@@ -544,6 +524,9 @@ def save_report_as_csv():
                     recommendation = f"Consolidate similar code in {full_path} found at lines {line1} and {line2}."
                 else:
                     recommendation = "No recommendation available."
+
+                # Generate recommendations
+                recommendation = generate_recommendation(clone_type, full_path, line1, line2)
 
                 # Write clone result with recommendation
                 writer.writerow([clone_type, line1, line2, similarity, full_path, recommendation])  # Save full file path
@@ -571,12 +554,28 @@ def save_report_as_pdf():
         pdf.cell(200, 10, txt="Code Clone Detection Report", ln=True, align='C')  # Title of the report
         pdf.ln(10)  # Add line break
         pdf.set_font("Arial", size=10)  # Set font for content
+
         for clone_type, line1, line2, similarity, file_name in clone_results:
+            # Generate recommendation
+            recommendation = generate_recommendation(clone_type, file_name, line1, line2)
             # Write each clone result to the PDF
             pdf.cell(200, 10, txt=f"{clone_type}: {file_name} - Lines {line1} and {line2} (Similarity: {similarity})",
                      ln=True)
+            # Add the recommendation to the PDF
+            pdf.cell(200, 10, txt=f"Recommendation: {recommendation}", ln=True)
+            pdf.ln(5)  # Add spacing between entries
+
         pdf.output(report_path)  # Save the PDF
         messagebox.showinfo("Save Report", f"PDF saved successfully at {report_path}")  # Confirmation message
+
+def generate_recommendation(clone_type: str, file_name: str, line1: int, line2: int) -> str:
+    if clone_type == "Type 1":
+        return f"Refactor duplicate code at {file_name} (lines {line1} and {line2})."
+    elif clone_type == "Type 2":
+        return f"Rename variables in {file_name} to avoid redundancy (lines {line1} and {line2})."
+    elif clone_type == "Type 3":
+        return f"Consolidate logic in {file_name} (lines {line1} and {line2})."
+    return "No recommendation available."
 
 
 def recommend_refactoring():
